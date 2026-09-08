@@ -7,10 +7,10 @@ import re
 import socketserver
 from typing import Any
 
-# --- UNIVERSAL CXAS SLOT-FILLING LOCAL HARNESS ---
+# --- UNIVERSAL CXAS SLOT-FILLING UI SERVER ---
 
 DEFAULT_PORT = 8085
-DEFAULT_DIRECTORY = "/Users/haneenaatheeq/Jetski Folder/schwab_cashiering"
+DEFAULT_DIRECTORY = "../schwab_cashiering"
 DEFAULT_AGENT = "Cashiering"
 HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webwidget-deploy.html")
 
@@ -33,31 +33,35 @@ class Part:
         return cls(text=text)
 
     @classmethod
+    def from_json(cls, json_str):
+        try:
+            data = json.loads(json_str)
+            return cls(custom_payload=data)
+        except Exception:
+            return cls(text=json_str)
+
+    @classmethod
     def from_function_call(cls, name, args):
         return cls(function_call=MockFunctionCall(name, args))
 
     @classmethod
-    def from_json(cls, data):
-        return cls(custom_payload=json.loads(data))
-
-    @classmethod
-    def from_agent_transfer(cls, agent_name):
-        return cls(agent_transfer=agent_name)
+    def from_agent_transfer(cls, target_agent):
+        return cls(agent_transfer=target_agent)
 
 
 class Content:
-    def __init__(self, parts=None, role="user"):
-        self.parts = parts or []
+    def __init__(self, parts, role="model"):
+        self.parts = parts
         self.role = role
 
 
 class LlmResponse:
-    def __init__(self, content=None):
+    def __init__(self, content):
         self.content = content
 
     @classmethod
     def from_parts(cls, parts):
-        return cls(content=Content(parts=parts))
+        return cls(Content(parts))
 
 
 class LlmRequestConfig:
@@ -84,9 +88,8 @@ class MockUserContent:
 class CallbackContext:
     def __init__(self, state, last_user_text="", events=None):
         self.state = state
-        self.last_user_text = last_user_text
-        self.events = events or []
         self.user_content = MockUserContent(last_user_text)
+        self.events = events or []
         self.variables = state
 
     def get_last_user_input(self):
@@ -126,18 +129,22 @@ class MockTools:
                 return MockResult({"success": True})
             return generic_mock
 
-        spec = importlib.util.spec_from_file_location(f"tool_{name}", py_path)
+        spec = importlib.util.spec_from_file_location(name, py_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        fn = getattr(mod, name, None)
-        if not fn:
-            for attr in dir(mod):
-                if callable(getattr(mod, attr)) and not attr.startswith("_"):
-                    fn = getattr(mod, attr)
-                    break
+        func = getattr(mod, name)
 
         def wrapper(*args, **kwargs):
-            res = fn(*args, **kwargs)
+            if args and isinstance(args[0], dict):
+                try:
+                    res = func(**args[0])
+                except TypeError:
+                    res = func(args[0])
+            else:
+                try:
+                    res = func(**kwargs)
+                except TypeError:
+                    res = func(kwargs)
             return MockResult(res)
 
         return wrapper
@@ -157,117 +164,6 @@ def get_user_session(session_id: str) -> dict:
             "hidden_tools": []
         }
     return SESSIONS[session_id]
-
-
-def is_branch_ready_for_fulfillment(filled: dict) -> bool:
-    tt = filled.get("transferType")
-    if not tt:
-        return False
-    if tt in ("ROLLOVER", "ZELLE"):
-        return True
-    if tt == "ASSET":
-        return bool(filled.get("assetSubtype"))
-    acct = filled.get("accountType")
-    if not acct:
-        return False
-    if tt == "ONLINE":
-        if acct == "IRA":
-            return bool(filled.get("iraAction"))
-        return True
-    if tt == "WIRE":
-        return True
-    if tt == "CHECK":
-        if acct == "IRA":
-            return bool(filled.get("checkAction"))
-        return True
-    return False
-
-
-def simulate_llm_setter_extraction(user_text: str, sm_state: dict, app_dir: str):
-    """Simulates the LLM calling thin setter tools and terminal tasks on each turn."""
-    if not user_text:
-        return
-    txt = user_text.lower()
-
-    # 0. Skip setter extraction for fast-path balance / status / transaction history lookups
-    if any(lk in txt for lk in ["balance", "balances", "status", "recent", "latest", "history", "transactions", "show my"]):
-        return
-
-    filled = sm_state.setdefault("filled", {})
-    tools_helper = MockTools(app_dir)
-
-    # 1. Transfer Type setter extraction (supports initial set AND mid-flow pivot/change)
-    detected_tt = None
-    if any(w in txt for w in ["online transfer", "online"]):
-        detected_tt = "ONLINE"
-    elif any(w in txt for w in ["wire transfer", "wire"]):
-        detected_tt = "WIRE"
-    elif any(w in txt for w in ["check deposit", "check withdrawal", "check transfer", "deposit check", "request check", "withdraw check", "check request"]):
-        detected_tt = "CHECK"
-    elif any(w in txt for w in ["rollover", "401k", "403b", "401(k)"]):
-        detected_tt = "ROLLOVER"
-    elif any(w in txt for w in ["asset transfer", "toa", "asset"]):
-        detected_tt = "ASSET"
-    elif "zelle" in txt:
-        detected_tt = "ZELLE"
-
-    if detected_tt:
-        if "transferType" not in filled or (detected_tt != filled.get("transferType") and any(p in txt for p in ["instead", "change", "actually", "switch", "transfer"])):
-            res = tools_helper.set_transfer_type(detected_tt).json()
-            new_tt = res.get("value", detected_tt)
-            if filled.get("transferType") and filled.get("transferType") != new_tt:
-                for dep_slot in ("accountType", "iraAction", "checkAction", "assetSubtype"):
-                    filled.pop(dep_slot, None)
-            filled["transferType"] = new_tt
-
-    # 2. Account Type setter extraction
-    if "accountType" not in filled or any(p in txt for p in ["instead", "change", "using my", "from my"]):
-        if "brokerage" in txt or txt.strip() == "1":
-            res = tools_helper.set_account_type("BROKERAGE").json()
-            filled["accountType"] = res.get("value", "BROKERAGE")
-        elif "bank" in txt or txt.strip() == "2":
-            res = tools_helper.set_account_type("BANK").json()
-            filled["accountType"] = res.get("value", "BANK")
-        elif "ira" in txt or txt.strip() == "3":
-            res = tools_helper.set_account_type("IRA").json()
-            filled["accountType"] = res.get("value", "IRA")
-
-    # 3. IRA Action setter extraction
-    if filled.get("accountType") == "IRA" and filled.get("transferType") == "ONLINE":
-        if "contrib" in txt:
-            res = tools_helper.set_ira_action("CONTRIBUTION").json()
-            filled["iraAction"] = res.get("value", "CONTRIBUTION")
-        elif "distrib" in txt or "withdraw" in txt:
-            res = tools_helper.set_ira_action("DISTRIBUTION").json()
-            filled["iraAction"] = res.get("value", "DISTRIBUTION")
-
-    # 4. Check Action setter extraction
-    if filled.get("accountType") == "IRA" and filled.get("transferType") == "CHECK":
-        if "deposit" in txt:
-            res = tools_helper.set_check_action("DEPOSIT").json()
-            filled["checkAction"] = res.get("value", "DEPOSIT")
-        elif any(w in txt for w in ["request", "withdraw", "withdrawal"]):
-            res = tools_helper.set_check_action("REQUEST").json()
-            filled["checkAction"] = res.get("value", "REQUEST")
-
-    # 5. Asset Subtype setter extraction
-    if filled.get("transferType") == "ASSET" and "assetSubtype" not in filled:
-        if any(w in txt for w in ["out", "to another", "another firm", "non schwab", "position", "positions", "something else", "other", "2"]):
-            res = tools_helper.set_asset_subtype("POSITIONS").json()
-            filled["assetSubtype"] = res.get("value", "POSITIONS")
-        elif any(w in txt for w in ["to schwab", "from another", "existing", "brokerage account", "full", "account", "1"]):
-            res = tools_helper.set_asset_subtype("ACCOUNT").json()
-            filled["assetSubtype"] = res.get("value", "ACCOUNT")
-
-    # 6. Auto-fire terminal task (DeliverFulfillment / mock_transfer_broker) when branch slots are ready
-    if is_branch_ready_for_fulfillment(filled) and sm_state.get("status") != "complete":
-        broker_res = tools_helper.mock_transfer_broker(request=filled).json()
-        broker_res["success"] = True
-        sm_state.setdefault("task_results", {})["DeliverFulfillment"] = broker_res
-        sm_state["_task_just_completed"] = "DeliverFulfillment"
-
-    # Also run automatic DAG schema introspection so any non-cashiering agent slots are extracted automatically
-    auto_introspect_dag_and_extract_slots(user_text, {"sm": sm_state}, app_dir, active_agent)
 
 
 def discover_agent_dag_slots(app_dir: str, agent_name: str) -> list[dict]:
@@ -296,25 +192,30 @@ def discover_agent_dag_slots(app_dir: str, agent_name: str) -> list[dict]:
 
 
 def auto_introspect_dag_and_extract_slots(user_text: str, state: dict, app_dir: str, agent_name: str) -> list[str]:
-    """Automatically introspects the agent's DAG config and extracts matching slot values from user text."""
+    """Universal DAG schema introspector that extracts slot values from natural language turns."""
     sm = state.setdefault("sm", {})
     filled = sm.setdefault("filled", {})
     tl = user_text.lower().strip()
 
     dag_slots = discover_agent_dag_slots(app_dir, agent_name)
     discovered_slot_names = [s.get("name") for s in dag_slots if s.get("name")]
+    tools_helper = MockTools(app_dir)
 
     for slot in dag_slots:
         slot_name = slot.get("name")
         if not slot_name:
             continue
 
+        # Verify prerequisite slots are filled before attempting extraction
         reqs = slot.get("requires", [])
         if reqs and not all(state.get(r) or sm.get(r) or filled.get(r) for r in reqs):
             continue
 
         allowed = slot.get("allowed_values", [])
+        setter_name = slot.get("setter")
+
         if allowed:
+            # Match against allowed_values declared in the DAG schema
             for val in allowed:
                 val_lower = str(val).lower()
                 synonyms = [val_lower]
@@ -330,6 +231,45 @@ def auto_introspect_dag_and_extract_slots(user_text: str, state: dict, app_dir: 
                     sm[slot_name] = val
                     filled[slot_name] = val
                     break
+        elif setter_name:
+            # Invoke setter tool if available or extract open-ended symbol/price values
+            try:
+                setter_fn = getattr(tools_helper, setter_name)
+                res = setter_fn(user_text.strip().upper()).json()
+                if isinstance(res, dict):
+                    val = res.get("value") or res.get(slot_name) or (user_text.strip().upper() if res.get("valid") else None)
+                    if val:
+                        state[slot_name] = val
+                        sm[slot_name] = val
+                        filled[slot_name] = val
+            except Exception:
+                pass
+
+        # Fallback open-ended extraction for symbol / price / amount slots
+        if not filled.get(slot_name):
+            if "symbol" in slot_name.lower() or "ticker" in slot_name.lower():
+                COMPANY_MAP = {"apple": "AAPL", "tesla": "TSLA", "nvidia": "NVDA", "microsoft": "MSFT", "google": "GOOG", "amazon": "AMZN", "schwab": "SCHW"}
+                for comp, sym in COMPANY_MAP.items():
+                    if comp in tl:
+                        state[slot_name] = sym
+                        sm[slot_name] = sym
+                        filled[slot_name] = sym
+                        break
+                if not filled.get(slot_name):
+                    for word in user_text.split():
+                        clean = word.strip(",.!?\"'$").upper()
+                        if clean.isalpha() and 1 <= len(clean) <= 5 and clean not in {"SET", "ALERT", "PRICE", "FOR", "LAST", "BID", "ASK", "RISE", "DROP", "YES", "NO"}:
+                            state[slot_name] = clean
+                            sm[slot_name] = clean
+                            filled[slot_name] = clean
+                            break
+            elif "price" in slot_name.lower() or "amount" in slot_name.lower():
+                price_match = re.search(r"\b(\d+(?:\.\d{1,4})?)\b", user_text)
+                if price_match:
+                    val = price_match.group(1)
+                    state[slot_name] = val
+                    sm[slot_name] = val
+                    filled[slot_name] = val
 
     return discovered_slot_names
 
@@ -398,8 +338,8 @@ class VisualizerHandler(http.server.SimpleHTTPRequestHandler):
 
             if user_text.lower().startswith("/channel"):
                 parts = user_text.split()
-                if len(parts) > 1 and parts[1].upper() in ("MOBILE", "WEB", "SCHWABCOM"):
-                    channel = "WEB" if parts[1].upper() in ("WEB", "SCHWABCOM") else "MOBILE"
+                if len(parts) > 1 and parts[1].upper() in ("MOBILE", "WEB"):
+                    channel = parts[1].upper()
                     session_sm.setdefault("filled", {})["channel"] = channel
                     self.send_response(200)
                     self.send_header("Content-type", "application/json")
@@ -427,7 +367,7 @@ class VisualizerHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(json.dumps({
-                    "message": "Session successfully reset! How can I help you with your transfer today?",
+                    "message": "Session successfully reset! How can I assist you today?",
                     "actions": get_quick_action_chips(session_sm),
                     "state": {
                         "filled": {},
@@ -443,18 +383,12 @@ class VisualizerHandler(http.server.SimpleHTTPRequestHandler):
                 session_sm = user_session["sm"]
                 session_history = user_session["history"]
 
-            cb_user_text = user_text
-            if any(p in user_text.lower() for p in ["check my", "check recent", "check latest", "check the", "check on", "check history", "check transactions"]):
-                cb_user_text = re.sub(r"\bcheck\b", "view", user_text, flags=re.IGNORECASE)
-
             if user_text:
-                session_history.append(("user", cb_user_text))
-                simulate_llm_setter_extraction(cb_user_text, session_sm, APP_DIRECTORY)
+                session_history.append(("user", user_text))
+                auto_introspect_dag_and_extract_slots(user_text, {"sm": session_sm}, APP_DIRECTORY, target_agent)
 
-            # Map UI channel 'WEB' to 'SCHWABCOM' if underlying Schwab callback expects SCHWABCOM
-            cb_channel = "SCHWABCOM" if channel == "WEB" else channel
             state_dict = {
-                "channel": cb_channel,
+                "channel": channel,
                 "sm": session_sm
             }
 
@@ -467,7 +401,7 @@ class VisualizerHandler(http.server.SimpleHTTPRequestHandler):
             mock_events = [MockEvent(is_user_flag=True)]
 
             cb = load_gecx_callback(target_agent, APP_DIRECTORY)
-            context = CallbackContext(state_dict, last_user_text=cb_user_text, events=mock_events)
+            context = CallbackContext(state_dict, last_user_text=user_text, events=mock_events)
 
             res = cb.before_model_callback(context, req)
             user_session["sm"] = state_dict["sm"]
@@ -487,7 +421,7 @@ class VisualizerHandler(http.server.SimpleHTTPRequestHandler):
                             if "payload" in cp and "actions" in cp["payload"]:
                                 actions.extend(cp["payload"]["actions"])
                             elif "scenarios" in cp:
-                                for sc in cp.get("scenarios", []):
+                                for sc in cp.get("scenarios", [])[:1]:
                                     for r_item in sc.get("responses", []):
                                         if r_item.get("type") == "text":
                                             response_text += r_item.get("text", "") + "\n"
