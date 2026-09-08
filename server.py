@@ -221,20 +221,28 @@ def auto_introspect_dag_and_extract_slots(user_text: str, state: dict, app_dir: 
                     state[slot_name] = val
                     sm[slot_name] = val
                     filled[slot_name] = val
-                    break
+                    return discovered_slot_names
         elif setter_name:
             # Invoke setter tool declared in the DAG schema
             try:
                 setter_fn = getattr(tools_helper, setter_name)
                 res = setter_fn(user_text.strip()).json()
                 if isinstance(res, dict):
-                    val = res.get("value") or res.get(slot_name)
+                    val = res.get("value") or res.get(slot_name) or (user_text.strip() if res.get("valid") else None)
                     if val:
                         state[slot_name] = val
                         sm[slot_name] = val
                         filled[slot_name] = val
+                        return discovered_slot_names
             except Exception:
                 pass
+
+        # Generic fallback: if this is the next unfilled open-ended slot in the DAG (no allowed_values), accept user input
+        if not allowed and not filled.get(slot_name):
+            state[slot_name] = user_text.strip()
+            sm[slot_name] = user_text.strip()
+            filled[slot_name] = user_text.strip()
+            return discovered_slot_names
 
     return discovered_slot_names
 
