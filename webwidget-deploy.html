@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Schwab Intelligent Assistant</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --primary: #00a4e4;
+      --primary-glow: rgba(0, 164, 228, 0.3);
+      --bg-gradient: linear-gradient(135deg, #070a13 0%, #0f172a 100%);
+      --glass-bg: rgba(255, 255, 255, 0.02);
+      --glass-border: rgba(255, 255, 255, 0.06);
+      --text-main: #ffffff;
+      --text-muted: #64748b;
+      --bubble-user: #1e293b;
+      --bubble-bot: #0f172a;
+      --success: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: var(--text-main);
+      overflow: hidden;
+    }
+
+    /* Blurred abstract backgrounds */
+    .bg-shape {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(90px);
+      z-index: 0;
+      opacity: 0.35;
+    }
+
+    .shape-1 {
+      top: -100px;
+      left: -100px;
+      width: 500px;
+      height: 500px;
+      background: #0f3e82;
+      animation: move 8s infinite alternate;
+    }
+
+    .shape-2 {
+      bottom: -100px;
+      right: -100px;
+      width: 500px;
+      height: 500px;
+      background: var(--primary);
+      animation: move 10s infinite alternate-reverse;
+    }
+
+    @keyframes move {
+      0% {
+        transform: translate(0, 0) scale(1);
+      }
+
+      100% {
+        transform: translate(50px, 30px) scale(1.1);
+      }
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: row;
+      gap: 2rem;
+      width: 100%;
+      max-width: 1300px;
+      height: 90vh;
+      max-height: 800px;
+      padding: 1rem;
+    }
+
+    /* Left Sidebar for Slot State visualization */
+    .left-panel {
+      flex: 1;
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      max-width: 400px;
+    }
+
+    .brand-header {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      background: var(--primary);
+      border-radius: 8px;
+      box-shadow: 0 0 10px var(--primary-glow);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 1.2rem;
+    }
+
+    .brand-title h1 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+      background: linear-gradient(to right, #fff, #a5c4f2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-title p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .state-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .state-card {
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+    }
+
+    .state-card h3 {
+      font-size: 0.85rem;
+      color: #a5c4f2;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--glass-border);
+      padding-bottom: 0.4rem;
+    }
+
+    .slot-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+
+    .slot-name {
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+
+    .slot-value {
+      color: var(--text-main);
+      font-weight: 500;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 0.2rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--glass-border);
+    }
+
+    .slot-pending {
+      color: #f59e0b;
+      font-weight: 500;
+      background: rgba(245, 158, 11, 0.1);
+      padding: 0.2rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-main);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--success);
+      box-shadow: 0 0 10px var(--success);
+    }
+
+    /* Reset Button */
+    .btn-reset {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      color: #ef4444;
+      padding: 0.75rem;
+      font-weight: 500;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.3s;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .btn-reset:hover {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.2);
+      box-shadow: 0 0 10px rgba(239, 68, 68, 0.1);
+    }
+
+    /* Right Chat Interface */
+    .right-panel {
+      flex: 2;
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    .chat-header {
+      padding: 1.2rem 1.5rem;
+      background: rgba(0, 0, 0, 0.1);
+      border-bottom: 1px solid var(--glass-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .chat-header h2 {
+      font-size: 1.1rem;
+      font-weight: 500;
+    }
+
+    .chat-messages {
+      flex: 1;
+      padding: 1.5rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+      scroll-behavior: smooth;
+    }
+
+    .message-bubble {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      max-width: 80%;
+      animation: fadeIn 0.3s ease-out both;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message-user {
+      align-self: flex-end;
+    }
+
+    .message-bot {
+      align-self: flex-start;
+    }
+
+    .bubble-content {
+      padding: 0.9rem 1.1rem;
+      border-radius: 16px;
+      font-size: 0.95rem;
+      line-height: 1.4;
+      white-space: pre-line;
+      word-break: normal;
+      overflow-wrap: break-word;
+    }
+
+    .message-user .bubble-content {
+      background: var(--bubble-user);
+      color: white;
+      border-bottom-right-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .message-bot .bubble-content {
+      background: var(--bubble-bot);
+      color: #cbd5e1;
+      border-bottom-left-radius: 4px;
+      border: 1px solid var(--glass-border);
+    }
+
+    /* Actions / Quick action buttons */
+    .message-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      align-self: flex-start;
+      width: 100%;
+    }
+
+    .action-btn {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      color: var(--primary);
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.3s;
+      font-family: 'Outfit', sans-serif;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .action-btn:hover {
+      background: rgba(0, 164, 228, 0.08);
+      border-color: rgba(0, 164, 228, 0.2);
+      box-shadow: 0 0 15px rgba(0, 164, 228, 0.15);
+      transform: translateY(-2px);
+    }
+
+    .action-icon {
+      font-size: 0.8rem;
+      opacity: 0.7;
+    }
+
+    /* Input Footer */
+    .chat-footer {
+      padding: 1.2rem 1.5rem;
+      background: rgba(0, 0, 0, 0.15);
+      border-top: 1px solid var(--glass-border);
+      display: flex;
+      gap: 0.8rem;
+      align-items: center;
+    }
+
+    .chat-input {
+      flex: 1;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      color: var(--text-main);
+      padding: 0.9rem 1.1rem;
+      font-size: 0.95rem;
+      outline: none;
+      font-family: 'Outfit', sans-serif;
+      transition: border-color 0.3s;
+    }
+
+    .chat-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 10px rgba(0, 164, 228, 0.1);
+    }
+
+    .btn-send {
+      background: var(--primary);
+      border: none;
+      border-radius: 14px;
+      color: white;
+      padding: 0.9rem 1.3rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: 'Outfit', sans-serif;
+      transition: all 0.3s;
+    }
+
+    .btn-send:hover {
+      background: #008bc4;
+      box-shadow: 0 0 15px var(--primary-glow);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="bg-shape shape-1"></div>
+  <div class="bg-shape shape-2"></div>
+
+  <div class="container">
+    <!-- Left Slot State Panel -->
+    <div class="left-panel">
+      <div class="brand-header">
+        <div class="brand-logo">S</div>
+        <div class="brand-title">
+          <h1>Schwab Intelligent Assistant</h1>
+          <p>GECX Local State Monitor</p>
+        </div>
+      </div>
+
+      <div class="state-section">
+        <!-- Slot States Card -->
+        <div class="state-card">
+          <h3>Slot Values (Filled)</h3>
+          <div id="filled-slots-list">
+            <div style="font-size: 0.8rem; color: var(--text-muted);">No slots filled yet.</div>
+          </div>
+        </div>
+
+        <!-- Pending Slots Card -->
+        <div class="state-card">
+          <h3>Pending Confirms</h3>
+          <div id="pending-slots-list">
+            <div style="font-size: 0.8rem; color: var(--text-muted);">No pending confirms.</div>
+          </div>
+        </div>
+
+        <!-- Session Status Card -->
+        <div class="state-card">
+          <h3>Session Info</h3>
+          <div class="slot-row">
+            <span class="slot-name">status</span>
+            <span class="status-badge" id="session-status">
+              <div class="status-dot"></div>
+              in_progress
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn-reset" id="btn-reset-session">Reset Session</button>
+    </div>
+
+    <!-- Right Chat Interface Panel -->
+    <div class="right-panel">
+      <div class="chat-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>Schwab Intelligent Assistant</h2>
+        <button id="channel-toggle-btn" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 0.35rem 0.75rem; border-radius: 8px; font-size: 0.75rem; font-weight: 600; cursor: pointer; font-family: 'Outfit', sans-serif;" title="Click to switch between MOBILE and WEB">Channel: MOBILE</button>
+      </div>
+
+      <div class="chat-messages" id="chat-messages-container">
+        <!-- Greeting Message -->
+        <div class="message-bubble message-bot">
+          <div class="bubble-content">
+            Hello! I am your Schwab Intelligent Assistant. How can I help you today?
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-footer">
+        <input type="text" class="chat-input" id="chat-input-field" placeholder="Type your message..."
+          autocomplete="off">
+        <button class="btn-send" id="btn-send-message">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const messagesContainer = document.getElementById('chat-messages-container');
+    const inputField = document.getElementById('chat-input-field');
+    const sendButton = document.getElementById('btn-send-message');
+    const resetButton = document.getElementById('btn-reset-session');
+
+    const filledSlotsContainer = document.getElementById('filled-slots-list');
+    const pendingSlotsContainer = document.getElementById('pending-slots-list');
+    const sessionStatusBadge = document.getElementById('session-status');
+
+    // Append a new message to the chat
+    function appendMessage(sender, text, actions = []) {
+      const bubble = document.createElement('div');
+      bubble.className = `message-bubble message-${sender}`;
+
+      const content = document.createElement('div');
+      content.className = 'bubble-content';
+
+      // Parse and format premium disclaimer blocks
+      if (sender === 'bot' && (text.includes("Disclaimer:") || text.includes("Investment and Insurance Products:"))) {
+        const disclaimerRegex = /(?:Disclaimer:\s*)?Investment and Insurance Products:\s*([^\n\r]+)/i;
+        const match = text.match(disclaimerRegex);
+        if (match) {
+          const fullMatch = match[0];
+          const disclaimerText = fullMatch.replace(/Disclaimer:\s*/i, "");
+
+          const disclaimerHtml = `
+                        <div style="background: rgba(245, 158, 11, 0.04); border-left: 3px solid #f59e0b; padding: 0.6rem 0.8rem; border-radius: 8px; margin: 0.6rem 0; font-size: 0.82rem; line-height: 1.4; color: #cbd5e1;">
+                            <span style="color: #f59e0b; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; display: block; margin-bottom: 0.25rem; letter-spacing: 0.5px;">⚠️ Investment Disclaimer</span>
+                            ${disclaimerText}
+                        </div>
+                    `;
+          text = text.replace(fullMatch, disclaimerHtml);
+        }
+      }
+
+      const firstIndex = text.search(/(?:^|\n)\s*\d+\.\s+/);
+      if (sender === 'bot' && firstIndex !== -1) {
+        const intro = text.substring(0, firstIndex).trim();
+        let formattedHtml = `<p style="margin-bottom: 0.6rem;">${intro}</p>`;
+        const listText = text.substring(firstIndex);
+
+        const regex = /(?:^|\n)\s*(\d+)\.\s+/g;
+        const itemIndices = [];
+        let match;
+        while ((match = regex.exec(listText)) !== null) {
+          itemIndices.push({
+            number: match[1],
+            index: match.index,
+            matchLength: match[0].length
+          });
+        }
+
+        formattedHtml += `<ul style="padding-left: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; list-style: none;">`;
+        for (let i = 0; i < itemIndices.length; i++) {
+          const current = itemIndices[i];
+          const start = current.index + current.matchLength;
+          const end = (i + 1 < itemIndices.length) ? itemIndices[i + 1].index : listText.length;
+          const itemText = listText.substring(start, end).trim();
+          formattedHtml += `<li style="display: flex; align-items: flex-start;"><span style="color: var(--primary); font-weight: 800; margin-right: 0.5rem; min-width: 1.2rem;">${current.number}.</span><span style="flex: 1;">${itemText}</span></li>`;
+        }
+        formattedHtml += `</ul>`;
+        content.innerHTML = formattedHtml;
+      } else {
+        if (sender === 'bot') {
+          let formattedText = text
+            .replace(/\*\*([^*]+)\*\*/g, '<strong style="color: #38bdf8; font-weight: 600;">$1</strong>')
+            .replace(/^\*\s+(.*)$/gm, '<div style="display: flex; align-items: center; gap: 0.5rem; margin: 0.35rem 0; padding-left: 0.25rem;"><span style="color: var(--primary); font-size: 1.1rem;">•</span><span>$1</span></div>');
+          content.innerHTML = formattedText;
+        } else {
+          content.textContent = text;
+        }
+      }
+      bubble.appendChild(content);
+
+      if (actions && actions.length > 0) {
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'message-actions';
+
+        actions.forEach(action => {
+          const btn = document.createElement('button');
+          btn.className = 'action-btn';
+          if (action.linkType === 'event') {
+            btn.innerHTML = `<span>${action.content}</span>`;
+            btn.onclick = async () => {
+              await sendChat(action.content, action.url);
+            };
+          } else {
+            btn.innerHTML = `<span>${action.content}</span><span class="action-icon">↗</span>`;
+            btn.onclick = () => {
+              if (action.url && action.url.startsWith('csretail://')) {
+                window.open('https://client.schwab.com/app/accounts/transfers/', '_blank');
+              } else {
+                window.open(action.url, '_blank');
+              }
+            };
+          }
+          actionsContainer.appendChild(btn);
+        });
+        bubble.appendChild(actionsContainer);
+      }
+
+      messagesContainer.appendChild(bubble);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // Update left state visualizer
+    function updateStateVisuals(state) {
+      // 1. Filled Slots
+      filledSlotsContainer.innerHTML = '';
+      const filled = state.filled || {};
+      const filledKeys = Object.keys(filled).filter(k => k !== 'channel');
+      if (filledKeys.length === 0) {
+        filledSlotsContainer.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-muted);">No slots filled yet.</div>';
+      } else {
+        filledKeys.forEach(k => {
+          const row = document.createElement('div');
+          row.className = 'slot-row';
+          row.style.marginBottom = '0.5rem';
+          row.innerHTML = `<span class="slot-name">${k}</span><span class="slot-value">${filled[k]}</span>`;
+          filledSlotsContainer.appendChild(row);
+        });
+      }
+
+      // 2. Pending Slots
+      pendingSlotsContainer.innerHTML = '';
+      const pending = state.pending || {};
+      const pendingKeys = Object.keys(pending);
+      if (pendingKeys.length === 0) {
+        pendingSlotsContainer.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-muted);">No pending confirms.</div>';
+      } else {
+        pendingKeys.forEach(k => {
+          const row = document.createElement('div');
+          row.className = 'slot-row';
+          row.style.marginBottom = '0.5rem';
+          row.innerHTML = `<span class="slot-name">${k}</span><span class="slot-pending">${pending[k]}</span>`;
+          pendingSlotsContainer.appendChild(row);
+        });
+      }
+
+      // 3. Session Status
+      const status = state.status || 'in_progress';
+      const statusColor = status === 'complete' ? '#10b981' : '#a5c4f2';
+      sessionStatusBadge.innerHTML = `<div class="status-dot" style="background-color: ${statusColor}; box-shadow: 0 0 10px ${statusColor}"></div> ${status}`;
+    }
+
+    // Generate or retrieve unique per-tab sessionId so multiple users can use the same Cloud Run URL concurrently
+    let sessionId = sessionStorage.getItem('cxas_session_id');
+    if (!sessionId) {
+      sessionId = 'sess_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
+      sessionStorage.setItem('cxas_session_id', sessionId);
+    }
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlAgent = urlParams.get('agent');
+
+    // Send chat message REST request helper
+    async function sendChat(text, eventName = null) {
+      if (!text && !eventName) return;
+
+      if (text) {
+        appendMessage('user', text);
+      }
+
+      try {
+        const payload = { sessionId };
+        if (urlAgent) payload.agent = urlAgent;
+        if (text) payload.message = text;
+        if (eventName) payload.event = eventName;
+
+        const res = await fetch('/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        appendMessage('bot', data.message, data.actions);
+        updateStateVisuals(data.state);
+      } catch (e) {
+        appendMessage('bot', "Hmm, I encountered an error connecting to the local GECX engine. Is the authenticated server running?");
+      }
+    }
+
+    async function sendMessage() {
+      const text = inputField.value.trim();
+      if (!text) return;
+      inputField.value = '';
+      await sendChat(text);
+    }
+
+    // Reset session REST request
+    async function resetSession() {
+      try {
+        await fetch('/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ reset: true, sessionId })
+        });
+        messagesContainer.innerHTML = `
+                    <div class="message-bubble message-bot">
+                        <div class="bubble-content">
+                            Session successfully reset! How can I help you with your transfer today?
+                        </div>
+                    </div>
+                `;
+        updateStateVisuals({ filled: {}, pending: {}, status: 'in_progress' });
+      } catch (e) {
+        alert("Failed to reset local GECX session.");
+      }
+    }
+
+    sendButton.onclick = sendMessage;
+    resetButton.onclick = resetSession;
+
+    const channelToggleBtn = document.getElementById('channel-toggle-btn');
+    let currentChannel = 'MOBILE';
+    channelToggleBtn.onclick = async () => {
+      currentChannel = currentChannel === 'MOBILE' ? 'WEB' : 'MOBILE';
+      channelToggleBtn.textContent = `Channel: ${currentChannel}`;
+      await sendChat(`/channel ${currentChannel}`);
+    };
+
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        sendMessage();
+      }
+    });
+  </script>
+</body>
+
+</html>
