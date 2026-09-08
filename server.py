@@ -192,7 +192,7 @@ def discover_agent_dag_slots(app_dir: str, agent_name: str) -> list[dict]:
 
 
 def auto_introspect_dag_and_extract_slots(user_text: str, state: dict, app_dir: str, agent_name: str) -> list[str]:
-    """Universal DAG schema introspector that extracts slot values from natural language turns."""
+    """Universal DAG schema introspector that extracts slot values strictly from the agent's DAG schema."""
     sm = state.setdefault("sm", {})
     filled = sm.setdefault("filled", {})
     tl = user_text.lower().strip()
@@ -215,61 +215,26 @@ def auto_introspect_dag_and_extract_slots(user_text: str, state: dict, app_dir: 
         setter_name = slot.get("setter")
 
         if allowed:
-            # Match against allowed_values declared in the DAG schema
+            # Match user input against allowed_values declared in the DAG schema
             for val in allowed:
-                val_lower = str(val).lower()
-                synonyms = [val_lower]
-                if val_lower == "rise":
-                    synonyms.extend(["rises", "above", "up"])
-                elif val_lower == "drop":
-                    synonyms.extend(["drops", "below", "down"])
-                elif val_lower in ("last", "bid", "ask"):
-                    synonyms.append(f"{val_lower} price")
-
-                if any(syn in tl for syn in synonyms):
+                if str(val).lower() in tl:
                     state[slot_name] = val
                     sm[slot_name] = val
                     filled[slot_name] = val
                     break
         elif setter_name:
-            # Invoke setter tool if available or extract open-ended symbol/price values
+            # Invoke setter tool declared in the DAG schema
             try:
                 setter_fn = getattr(tools_helper, setter_name)
-                res = setter_fn(user_text.strip().upper()).json()
+                res = setter_fn(user_text.strip()).json()
                 if isinstance(res, dict):
-                    val = res.get("value") or res.get(slot_name) or (user_text.strip().upper() if res.get("valid") else None)
+                    val = res.get("value") or res.get(slot_name)
                     if val:
                         state[slot_name] = val
                         sm[slot_name] = val
                         filled[slot_name] = val
             except Exception:
                 pass
-
-        # Fallback open-ended extraction for symbol / price / amount slots
-        if not filled.get(slot_name):
-            if "symbol" in slot_name.lower() or "ticker" in slot_name.lower():
-                COMPANY_MAP = {"apple": "AAPL", "tesla": "TSLA", "nvidia": "NVDA", "microsoft": "MSFT", "google": "GOOG", "amazon": "AMZN", "schwab": "SCHW"}
-                for comp, sym in COMPANY_MAP.items():
-                    if comp in tl:
-                        state[slot_name] = sym
-                        sm[slot_name] = sym
-                        filled[slot_name] = sym
-                        break
-                if not filled.get(slot_name):
-                    for word in user_text.split():
-                        clean = word.strip(",.!?\"'$").upper()
-                        if clean.isalpha() and 1 <= len(clean) <= 5 and clean not in {"SET", "ALERT", "PRICE", "FOR", "LAST", "BID", "ASK", "RISE", "DROP", "YES", "NO"}:
-                            state[slot_name] = clean
-                            sm[slot_name] = clean
-                            filled[slot_name] = clean
-                            break
-            elif "price" in slot_name.lower() or "amount" in slot_name.lower():
-                price_match = re.search(r"\b(\d+(?:\.\d{1,4})?)\b", user_text)
-                if price_match:
-                    val = price_match.group(1)
-                    state[slot_name] = val
-                    sm[slot_name] = val
-                    filled[slot_name] = val
 
     return discovered_slot_names
 
